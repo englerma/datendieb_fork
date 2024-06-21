@@ -1,8 +1,8 @@
 # Datendieb
 
-## Allgemein
+## General
 
-This is a project in python as part of a lecture at the Albstadt-Sigmaringen University of Applied Sciences.
+This is a forked project of https://github.com/bananakaba/datendieb
 
 ## client.py
 
