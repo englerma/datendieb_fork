@@ -14,8 +14,7 @@ Datendieb is a project focused on client-server communication to gather and mana
 - [Client](#client)
 - [Server](#server)
 - [Usage](#usage)
-- [Contributing](#contributing)
-- [License](#license)
+- [Examples](#Examples)
 
 ## General
 
